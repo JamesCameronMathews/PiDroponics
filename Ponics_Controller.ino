@@ -18,16 +18,34 @@
 
 //------------------------ Device parameters ------------------------
 #define ANALOG_DEVICE_ENDPOINT_NUMBER      1
+
 #define MODEL_NAME          "HYDROPONICS"
 #define MANUFACTURER_NAME   "JIMBO"
 
 //------------------------ Endpoints ------------------------
+///////// Analog
 ZigbeeAnalog zbAnalogDevice = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER);
-ZigbeeAnalog zbAnalogTemp = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 1);
-ZigbeeAnalog zbAnalogFan = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 2);
-ZigbeeAnalog zbAnalogPercent = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 3);
 
-//// 'Clusters' that need to be set up in ZigbeeAnalog:
+ZigbeeAnalog zbAnalogFan_a = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 1);
+ZigbeeAnalog zbAnalogFan_b = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 2);
+ZigbeeAnalog zbAnalogLights = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 3);
+ZigbeeAnalog zbAnalogTemp_aht10 = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 4);
+ZigbeeAnalog zbAnalogHumidity_aht10 = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 5);
+ZigbeeAnalog zbAnalogTemp_ds12b = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 6);
+ZigbeeAnalog zbAnalogPh = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 13);
+ZigbeeAnalog zbAnalogTds = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 14);
+
+///////// Binary
+ZigbeeBinary zbBinaryAirPump = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 7);
+ZigbeeBinary zbBinaryWaterPump = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 8);
+ZigbeeBinary zbBinaryWaterHeater = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 9);
+ZigbeeBinary zbBinaryDosePump_a = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 10);
+ZigbeeBinary zbBinaryDosePump_b = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 11);
+ZigbeeBinary zbBinaryDosePump_c = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 12);
+
+
+
+//// 'Clusters' that need to be set up in Zigbee:
 //      -- Input x1: Dht10b water temp sensor
 //      -- Input x2: Aht10 air temp and humidity sensor
 //      -- Input x1: TDS sensor
@@ -51,7 +69,7 @@ void onAnalogOutputChange(float analog_output) {
 void setup() {
   Serial.begin(115200);
   delay(1000);
-
+  
   pinMode(INPUT_GPIO, INPUT);
   pinMode(BOOT_PIN, INPUT_PULLUP);
 
@@ -60,45 +78,45 @@ void setup() {
 
   /////////////////// Fan A ------------------------
   // Set up analog input
-  zbAnalogFan.addAnalogInput();
-  zbAnalogFan.setAnalogInputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
-  zbAnalogFan.setAnalogInputDescription("RPM");
-  zbAnalogFan.setAnalogInputResolution(1);
+  zbAnalogFan_a.addAnalogInput();
+  zbAnalogFan_a.setAnalogInputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFan_a.setAnalogInputDescription("RPM");
+  zbAnalogFan_a.setAnalogInputResolution(1);
 
   // Set up analog output
-  zbAnalogDevice.addAnalogOutput();
-  zbAnalogDevice.setAnalogOutputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
-  zbAnalogDevice.setAnalogOutputDescription("Fan Speed (RPM)");
+  zbAnalogFan_a.addAnalogOutput();
+  zbAnalogFan_a.setAnalogOutputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFan_a.setAnalogOutputDescription("Fan Speed (RPM)");
 
   /////////////////// Fan B ------------------------
   // Set up analog input
-  zbAnalogFan.addAnalogInput();
-  zbAnalogFan.setAnalogInputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
-  zbAnalogFan.setAnalogInputDescription("RPM");
-  zbAnalogFan.setAnalogInputResolution(1);
+  zbAnalogFan_b.addAnalogInput();
+  zbAnalogFan_b.setAnalogInputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFan_b.setAnalogInputDescription("RPM");
+  zbAnalogFan_b.setAnalogInputResolution(1);
 
   // Set up analog output
-  zbAnalogDevice.addAnalogOutput();
-  zbAnalogDevice.setAnalogOutputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
-  zbAnalogDevice.setAnalogOutputDescription("Fan Speed (RPM)");
+  zbAnalogFan_b.addAnalogOutput();
+  zbAnalogFan_b.setAnalogOutputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFan_b.setAnalogOutputDescription("Fan Speed (RPM)");
 
   /////////////////// LEDs ------------------------
   // Set up analog input
-  zbAnalogFan.addAnalogInput();
-  zbAnalogFan.setAnalogInputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER));
-  zbAnalogFan.setAnalogInputDescription("LED Brightness");
-  zbAnalogFan.setAnalogInputResolution(1);
+  zbAnalogLights.addAnalogInput();
+  zbAnalogLights.setAnalogInputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER));
+  zbAnalogLights.setAnalogInputDescription("LED Brightness");
+  zbAnalogLights.setAnalogInputResolution(1);
 
   // Set up analog output
-  zbAnalogDevice.addAnalogOutput();
-  zbAnalogDevice.setAnalogOutputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER));
-  zbAnalogDevice.setAnalogOutputDescription("LED Brightness");
+  zbAnalogLights.addAnalogOutput();
+  zbAnalogLights.setAnalogOutputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER));
+  zbAnalogLights.setAnalogOutputDescription("LED Brightness");
 
   /////////////////// DHT10b ------------------------
   // Set up analog input
   zbAnalogTemp.addAnalogInput();
-  zbAnalogTemp.setAnalogInputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER));
-  zbAnalogTemp.setAnalogInputDescription("Temperature");
+  zbAnalogTemp.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
+  zbAnalogTemp.setAnalogInputDescription("Water Temperature");
   zbAnalogTemp.setAnalogInputResolution(0.1);
 
   /////////////////// AHT10 ------------------------
@@ -110,14 +128,54 @@ void setup() {
 
   // Set up analog input
   zbAnalogPercent.addAnalogInput();
-  zbAnalogPercent.setAnalogInputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER);
+  zbAnalogPercent.setAnalogInputApplication(ESP_ZB_ZCL_AI_HUMIDITY_OTHER);
   zbAnalogPercent.setAnalogInputDescription("Humidity Percentage");
   zbAnalogPercent.setAnalogInputResolution(0.01);
 
+  /////////////////// Air pump ------------------------
+  // Set up binary input
+  zbBinaryAirPump.addBinaryInput();
+  zbBinaryAirPump.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryAirPump.setBinaryInputDescription("Air Pump Status");
 
+  // Set up binary output
+  zbBinaryAirPump.addBinaryOutput();
+  zbBinaryAirPump.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryAirPump.setBinaryOutputDescription("Air Pump Switch");
+
+  /////////////////// Water pump ------------------------
+  // Set up binary input
+  zbBinaryWaterPump.addBinaryInput();
+  zbBinaryWaterPump.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryWaterPump.setBinaryInputDescription("Water Pump Status");
+
+  // Set up binary output
+  zbBinaryWaterPump.addBinaryOutput();
+  zbBinaryWaterPump.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryWaterPump.setBinaryOutputDescription("Water Pump Switch");
+
+  /////////////////// Dosing pumps ------------------------
+  // Set up binary input
+  zbBinaryAirPump.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryAirPump.setBinaryInputDescription("Water Pump Status");
+
+  // Set up binary output
+  zbBinaryAirPump.addBinaryOutput();
+  zbBinaryAirPump.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryAirPump.setBinaryOutputDescription("Water Pump Switch");
+
+
+
+  //////////////////// Zigbee endpoint config
   
+  // Do I need to set these parameters for all endpoints? Or just the global device somehow?
   _ep.setManufacturerAndModel(MANUFACTURER_NAME, MODEL_NAME);
   _ep.setPowerSource(ZB_POWER_SOURCE_MAINS, 75);
+  // Add the endpoints to Zb core
+  Zigbee.addEndpoint(&_ep);
+  Zigbee.addEndpoint(&_ep);
+  Zigbee.addEndpoint(&_ep);
+  Zigbee.addEndpoint(&_ep);
   Zigbee.addEndpoint(&_ep);
 
   Serial.println("Zigbee initializing...");
