@@ -7,21 +7,34 @@
 
 //------------------------ GPIO Definition ------------------------
 // GPIO definitions 
-#define FAN_A_GPIO       14  // PWM output for Fan A
-#define FAN_B_GPIO       27  // PWM output for Fan B
-#define LED_GPIO         32  // PWM output for LED lights
-#define WATER_PUMP_GPIO  33  // Digital output for Water Pump relay
-#define AIR_PUMP_GPIO    25  // Digital output for Air Pump relay
-#define DOSE_PUMP_A_GPIO 26  // Digital output for Dose Pump A
-#define DOSE_PUMP_B_GPIO 22  // Digital output for Dose Pump B
-#define DOSE_PUMP_C_GPIO 23  // Digital output for Dose Pump C
-#define WATER_HEATER_GPIO 21 // Digital output for Water Heater relay
+// PWM outputs (LEDC capable)
+#define FAN_A_GPIO         16   // PWM output for Fan A
+#define FAN_B_GPIO         17   // PWM output for Fan B
+#define LED_GPIO           18   // PWM output for LED lights
 
-#define DS18B20_GPIO     4   // 1-Wire pin for DS18B20 temperature
-#define TDS_GPIO         36  // ADC input for TDS sensor (ADC1 channel)
-#define pH_GPIO          39  // ADC input for pH sensor (ADC1 channel)
+// Digital relay outputs
+#define WATER_PUMP_GPIO    22   // Digital output for Water Pump relay
+#define AIR_PUMP_GPIO      23   // Digital output for Air Pump relay
+#define DOSE_PUMP_A_GPIO   24   // Digital output for Dose Pump A
+#define DOSE_PUMP_B_GPIO   25   // Digital output for Dose Pump B
+#define DOSE_PUMP_C_GPIO   26   // Digital output for Dose Pump C
+#define WATER_HEATER_GPIO  21   // Digital output for Water Heater relay
 
-#define BOOT_PIN         9   // Button (active LOW) for Zigbee factory reset
+// 1-Wire
+#define DS18B20_GPIO        7   // 1-Wire pin for DS18B20 temperature sensor
+
+// Analog inputs (ADC on GPIO1–GPIO6 only)
+#define TDS_GPIO            1   // ADC input for TDS sensor
+#define PH_GPIO             2   // ADC input for pH sensor
+
+// I2C (for AHT10)
+#define SDA_GPIO           19   // I2C SDA
+#define SCL_GPIO           20   // I2C SCL
+
+// System pins
+#define BATTERY_ADC_PIN     0   // Optional: built-in battery voltage sense (FireBeetle uses IO0)
+#define BOOT_PIN            9   // Boot/reset button (DO NOT repurpose)
+#define ONBOARD_LED        15   // Onboard LED (optional status indicator)
 
 
 //------------------------ Device parameters ------------------------
