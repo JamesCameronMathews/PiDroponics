@@ -1,19 +1,27 @@
 //------------------------ Includes ------------------------
 #include <Arduino.h>
-#include <esp_sleep.h>
-#include <Preferences.h>
 #include "Zigbee.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Adafruit_AHTX0.h>
 
 //------------------------ GPIO Definition ------------------------
-#define INPUT_GPIO    5     // input
-#define INPUT_GPIO    5     // input
-#define INPUT_GPIO    5     // input
-#define INPUT_GPIO    5     // input
-#define INPUT_GPIO    5     // input
-#define OUTPUT_GPIO_1    5     // input
-#define BATTERY_ADC_PIN     0     // Battery voltage measurement
-#define BOOT_PIN            9     // Button for Zigbee reset
-#define REFERENCE_PIN       4     // Control grnd voltage
+// GPIO definitions 
+#define FAN_A_GPIO       14  // PWM output for Fan A
+#define FAN_B_GPIO       27  // PWM output for Fan B
+#define LED_GPIO         32  // PWM output for LED lights
+#define WATER_PUMP_GPIO  33  // Digital output for Water Pump relay
+#define AIR_PUMP_GPIO    25  // Digital output for Air Pump relay
+#define DOSE_PUMP_A_GPIO 26  // Digital output for Dose Pump A
+#define DOSE_PUMP_B_GPIO 22  // Digital output for Dose Pump B
+#define DOSE_PUMP_C_GPIO 23  // Digital output for Dose Pump C
+#define WATER_HEATER_GPIO 21 // Digital output for Water Heater relay
+
+#define DS18B20_GPIO     4   // 1-Wire pin for DS18B20 temperature
+#define TDS_GPIO         36  // ADC input for TDS sensor (ADC1 channel)
+#define pH_GPIO          39  // ADC input for pH sensor (ADC1 channel)
+
+#define BOOT_PIN         9   // Button (active LOW) for Zigbee factory reset
 
 
 //------------------------ Device parameters ------------------------
@@ -23,58 +31,123 @@
 #define MANUFACTURER_NAME   "JIMBO"
 
 //------------------------ Endpoints ------------------------
-///////// Analog
-ZigbeeAnalog zbAnalogDevice = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER);
+// Zigbee endpoints for analog sensors
+ZigbeeAnalog zbAnalogFanA      = ZigbeeAnalog(1);
+ZigbeeAnalog zbAnalogFanB      = ZigbeeAnalog(2);
+ZigbeeAnalog zbAnalogLights    = ZigbeeAnalog(3);
+ZigbeeAnalog zbAnalogTempAHT10 = ZigbeeAnalog(4);
+ZigbeeAnalog zbAnalogHumAHT10  = ZigbeeAnalog(5);
+ZigbeeAnalog zbAnalogTempDS18  = ZigbeeAnalog(6);
+ZigbeeAnalog zbAnalogPh        = ZigbeeAnalog(7);
+ZigbeeAnalog zbAnalogTds       = ZigbeeAnalog(8);
 
-ZigbeeAnalog zbAnalogFan_a = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 1);
-ZigbeeAnalog zbAnalogFan_b = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 2);
-ZigbeeAnalog zbAnalogLights = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 3);
-ZigbeeAnalog zbAnalogTemp_aht10 = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 4);
-ZigbeeAnalog zbAnalogHumidity_aht10 = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 5);
-ZigbeeAnalog zbAnalogTemp_ds12b = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 6);
-ZigbeeAnalog zbAnalogPh = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 13);
-ZigbeeAnalog zbAnalogTds = ZigbeeAnalog(ANALOG_DEVICE_ENDPOINT_NUMBER + 14);
-
-///////// Binary
-ZigbeeBinary zbBinaryAirPump = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 7);
-ZigbeeBinary zbBinaryWaterPump = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 8);
-ZigbeeBinary zbBinaryWaterHeater = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 9);
-ZigbeeBinary zbBinaryDosePump_a = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 10);
-ZigbeeBinary zbBinaryDosePump_b = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 11);
-ZigbeeBinary zbBinaryDosePump_c = ZigbeeBinary(ANALOG_DEVICE_ENDPOINT_NUMBER + 12);
-
-
-
-//// 'Clusters' that need to be set up in Zigbee:
-//      -- Input x1: Dht10b water temp sensor
-//      -- Input x2: Aht10 air temp and humidity sensor
-//      -- Input x1: TDS sensor
-//      -- Input x1: pH sensor
-//      -- Output x1: PWM fan 1
-//      -- Output x1: PWM fan 2
-//      -- Output x1: PWM LEDs
-//      -- Output x1: Relay controlled water pump
-//      -- Output x1: Relay controlled air pump
-//      -- Output x1: Relay controlled water heater
-//      -- Output x1: Relay controlled dosing pump 1
-//      -- Output x1: Relay controlled dosing pump 2
-//      -- Output x1: Relay controlled dosing pump 3
+// Zigbee endpoints for binary devices
+ZigbeeBinary zbBinaryAirPump     = ZigbeeBinary(9);
+ZigbeeBinary zbBinaryWaterPump   = ZigbeeBinary(10);
+ZigbeeBinary zbBinaryWaterHeater = ZigbeeBinary(11);
+ZigbeeBinary zbBinaryDosePumpA   = ZigbeeBinary(12);
+ZigbeeBinary zbBinaryDosePumpB   = ZigbeeBinary(13);
+ZigbeeBinary zbBinaryDosePumpC   = ZigbeeBinary(14);
 
 //------------------------ Output Callback ------------------------
-void onAnalogOutputChange(float analog_output) {
-  Serial.printf("Received analog output change: %.1f\r\n", analog_output);
+// Callback for analog output changes (0–100% -> PWM duty)
+void setFanASpeed(float speed) {
+  int duty = constrain(int(speed * 2.55), 0, 255);
+  analogWrite(FAN_A_GPIO, duty);
 }
+void setFanBSpeed(float speed) {
+  int duty = constrain(int(speed * 2.55), 0, 255);
+  analogWrite(FAN_B_GPIO, duty);
+}
+void setLightsBrightness(float brightness) {
+  int duty = constrain(int(brightness * 2.55), 0, 255);
+  analogWrite(LED_GPIO, duty);
+}
+
+// Callback for binary output changes (turn relay on/off)
+void airPumpSwitch(bool state) {
+  digitalWrite(AIR_PUMP_GPIO, state ? HIGH : LOW);
+  zbBinaryAirPump.setBinaryInput(state);
+  zbBinaryAirPump.reportBinaryInput();
+}
+void waterPumpSwitch(bool state) {
+  digitalWrite(WATER_PUMP_GPIO, state ? HIGH : LOW);
+  zbBinaryWaterPump.setBinaryInput(state);
+  zbBinaryWaterPump.reportBinaryInput();
+}
+void waterHeaterSwitch(bool state) {
+  digitalWrite(WATER_HEATER_GPIO, state ? HIGH : LOW);
+  zbBinaryWaterHeater.setBinaryInput(state);
+  zbBinaryWaterHeater.reportBinaryInput();
+}
+void dosePumpASwitch(bool state) {
+  digitalWrite(DOSE_PUMP_A_GPIO, state ? HIGH : LOW);
+  zbBinaryDosePumpA.setBinaryInput(state);
+  zbBinaryDosePumpA.reportBinaryInput();
+}
+void dosePumpBSwitch(bool state) {
+  digitalWrite(DOSE_PUMP_B_GPIO, state ? HIGH : LOW);
+  zbBinaryDosePumpB.setBinaryInput(state);
+  zbBinaryDosePumpB.reportBinaryInput();
+}
+void dosePumpCSwitch(bool state) {
+  digitalWrite(DOSE_PUMP_C_GPIO, state ? HIGH : LOW);
+  zbBinaryDosePumpC.setBinaryInput(state);
+  zbBinaryDosePumpC.reportBinaryInput();
+}
+
+///// Configure sensors
+Adafruit_AHTX0 aht;
+OneWire oneWire(DS18B20_GPIO);
+DallasTemperature sensors(&oneWire);
 
 //------------------------ Setup ------------------------
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  
-  pinMode(INPUT_GPIO, INPUT);
+  Serial.println("Starting Zigbee hydroponics controller...");
+
+  // Initialize button for factory reset
   pinMode(BOOT_PIN, INPUT_PULLUP);
 
+  // Configure ADC (12-bit, full-scale 3.3V)
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
+
+  // Initialize sensors
+  sensors.begin();  // DS18B20
+  if (!aht.begin()) {
+    Serial.println("Failed to find AHT10 sensor!");
+  }
+
+  // Configure PWM outputs
+  pinMode(FAN_A_GPIO, OUTPUT);
+  pinMode(FAN_B_GPIO, OUTPUT);
+  pinMode(LED_GPIO, OUTPUT);
+  analogWriteResolution(FAN_A_GPIO, 8);
+  analogWriteFrequency(FAN_A_GPIO, 5000);
+  analogWriteResolution(FAN_B_GPIO, 8);
+  analogWriteFrequency(FAN_B_GPIO, 5000);
+  analogWriteResolution(LED_GPIO, 8);
+  analogWriteFrequency(LED_GPIO, 5000);
+  analogWrite(FAN_A_GPIO, 0);
+  analogWrite(FAN_B_GPIO, 0);
+  analogWrite(LED_GPIO, 0);
+
+  // Configure relay outputs
+  pinMode(AIR_PUMP_GPIO, OUTPUT);
+  pinMode(WATER_PUMP_GPIO, OUTPUT);
+  pinMode(WATER_HEATER_GPIO, OUTPUT);
+  pinMode(DOSE_PUMP_A_GPIO, OUTPUT);
+  pinMode(DOSE_PUMP_B_GPIO, OUTPUT);
+  pinMode(DOSE_PUMP_C_GPIO, OUTPUT);
+  digitalWrite(AIR_PUMP_GPIO, LOW);
+  digitalWrite(WATER_PUMP_GPIO, LOW);
+  digitalWrite(WATER_HEATER_GPIO, LOW);
+  digitalWrite(DOSE_PUMP_A_GPIO, LOW);
+  digitalWrite(DOSE_PUMP_B_GPIO, LOW);
+  digitalWrite(DOSE_PUMP_C_GPIO, LOW);
+
 
   /////////////////// Fan A ------------------------
   // Set up analog input
@@ -112,25 +185,37 @@ void setup() {
   zbAnalogLights.setAnalogOutputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER));
   zbAnalogLights.setAnalogOutputDescription("LED Brightness");
 
-  /////////////////// DHT10b ------------------------
+  /////////////////// DS18b20 ------------------------
   // Set up analog input
-  zbAnalogTemp.addAnalogInput();
-  zbAnalogTemp.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
-  zbAnalogTemp.setAnalogInputDescription("Water Temperature");
-  zbAnalogTemp.setAnalogInputResolution(0.1);
+  zbAnalogTemp_DS18b20.addAnalogInput();
+  zbAnalogTemp_DS18b20.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
+  zbAnalogTemp_DS18b20.setAnalogInputDescription("Water Temperature");
+  zbAnalogTemp_DS18b20.setAnalogInputResolution(0.01);
 
   /////////////////// AHT10 ------------------------
   // Set up analog input
-  zbAnalogTemp.addAnalogInput();
-  zbAnalogTemp.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
-  zbAnalogTemp.setAnalogInputDescription("Temperature");
-  zbAnalogTemp.setAnalogInputResolution(0.1);
+  zbAnalogTemp_aht10.addAnalogInput();
+  zbAnalogTemp_aht10.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
+  zbAnalogTemp_aht10.setAnalogInputDescription("Air Temperature");
+  zbAnalogTemp_aht10.setAnalogInputResolution(0.01);
 
   // Set up analog input
-  zbAnalogPercent.addAnalogInput();
-  zbAnalogPercent.setAnalogInputApplication(ESP_ZB_ZCL_AI_HUMIDITY_OTHER);
-  zbAnalogPercent.setAnalogInputDescription("Humidity Percentage");
-  zbAnalogPercent.setAnalogInputResolution(0.01);
+  zbAnalogHumidity_aht10.addAnalogInput();
+  zbAnalogHumidity_aht10.setAnalogInputApplication(ESP_ZB_ZCL_AI_HUMIDITY_OTHER);
+  zbAnalogHumidity_aht10.setAnalogInputDescription("Humidity Percentage");
+  zbAnalogHumidity_aht10.setAnalogInputResolution(0.01);
+
+  /////////////////// pH ------------------------------
+  zbAnalogPh.addAnalogInput();
+  zbAnalogPh.setAnalogInputApplication(ESP_ZB_ZCL_AI_COUNT_UNITLESS_OTHER);
+  zbAnalogPh.setAnalogInputDescription("Water pH");
+  zbAnalogPh.setAnalogInputResolution(0.01);
+
+  /////////////////// TDS ------------------------------
+  zbAnalogTds.addAnalogInput();
+  zbAnalogTds.setAnalogInputApplication(ESP_ZB_ZCL_AI_COUNT_UNITLESS_OTHER);
+  zbAnalogTds.setAnalogInputDescription("Water TDS");
+  zbAnalogTds.setAnalogInputResolution(0.01);
 
   /////////////////// Air pump ------------------------
   // Set up binary input
@@ -154,29 +239,181 @@ void setup() {
   zbBinaryWaterPump.setBinaryOutputApplication(0xFFFF); // Other Output BO
   zbBinaryWaterPump.setBinaryOutputDescription("Water Pump Switch");
 
-  /////////////////// Dosing pumps ------------------------
+  /////////////////// Water heater ------------------------
   // Set up binary input
-  zbBinaryAirPump.setBinaryInputApplication(0x0078); // Generic Status BI
-  zbBinaryAirPump.setBinaryInputDescription("Water Pump Status");
+  zbBinaryWaterHeater.addBinaryInput();
+  zbBinaryWaterHeater.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryWaterHeater.setBinaryInputDescription("Water Heater Status");
 
   // Set up binary output
-  zbBinaryAirPump.addBinaryOutput();
-  zbBinaryAirPump.setBinaryOutputApplication(0xFFFF); // Other Output BO
-  zbBinaryAirPump.setBinaryOutputDescription("Water Pump Switch");
+  zbBinaryWaterHeater.addBinaryOutput();
+  zbBinaryWaterHeater.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryWaterHeater.setBinaryOutputDescription("Water Heater Switch");
 
+  /////////////////// Dosing pumps ------------------------
+  // Set up binary input
+  zbBinaryDosePump_a.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryDosePump_a.setBinaryInputDescription("DosePump_a Status");
 
+  // Set up binary output
+  zbBinaryDosePump_a.addBinaryOutput();
+  zbBinaryDosePump_a.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryDosePump_a.setBinaryOutputDescription("DosePump_a Switch");
+
+  // Set up binary input
+  zbBinaryDosePump_b.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryDosePump_b.setBinaryInputDescription("DosePump_b Status");
+
+  // Set up binary output
+  zbBinaryDosePump_b.addBinaryOutput();
+  zbBinaryDosePump_b.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryDosePump_b.setBinaryOutputDescription("DosePump_b Switch"); 
+
+  // Set up binary input
+  zbBinaryDosePump_c.setBinaryInputApplication(0x0078); // Generic Status BI
+  zbBinaryDosePump_c.setBinaryInputDescription("DosePump_c Status");
+
+  // Set up binary output
+  zbBinaryDosePump_c.addBinaryOutput();
+  zbBinaryDosePump_c.setBinaryOutputApplication(0xFFFF); // Other Output BO
+  zbBinaryDosePump_c.setBinaryOutputDescription("DosePump_c Switch"); 
+
+  //////////////////// Set up AHT10 here
 
   //////////////////// Zigbee endpoint config
-  
-  // Do I need to set these parameters for all endpoints? Or just the global device somehow?
-  _ep.setManufacturerAndModel(MANUFACTURER_NAME, MODEL_NAME);
-  _ep.setPowerSource(ZB_POWER_SOURCE_MAINS, 75);
-  // Add the endpoints to Zb core
-  Zigbee.addEndpoint(&_ep);
-  Zigbee.addEndpoint(&_ep);
-  Zigbee.addEndpoint(&_ep);
-  Zigbee.addEndpoint(&_ep);
-  Zigbee.addEndpoint(&_ep);
+  // --- Configure Zigbee endpoints --- 
+  // Fan A (analog input + output)
+  zbAnalogFanA.addAnalogInput();
+  zbAnalogFanA.setAnalogInputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFanA.setAnalogInputDescription("Fan A Speed");
+  zbAnalogFanA.setAnalogInputResolution(1);
+  zbAnalogFanA.addAnalogOutput();
+  zbAnalogFanA.setAnalogOutputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFanA.setAnalogOutputDescription("Fan A Control");
+  zbAnalogFanA.setAnalogOutputResolution(1);
+  zbAnalogFanA.onAnalogOutputChange(setFanASpeed);
+
+  // Fan B (analog input + output)
+  zbAnalogFanB.addAnalogInput();
+  zbAnalogFanB.setAnalogInputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFanB.setAnalogInputDescription("Fan B Speed");
+  zbAnalogFanB.setAnalogInputResolution(1);
+  zbAnalogFanB.addAnalogOutput();
+  zbAnalogFanB.setAnalogOutputApplication(ESP_ZB_ZCL_AI_RPM_OTHER);
+  zbAnalogFanB.setAnalogOutputDescription("Fan B Control");
+  zbAnalogFanB.setAnalogOutputResolution(1);
+  zbAnalogFanB.onAnalogOutputChange(setFanBSpeed);
+
+  // LED Lights (analog input + output)
+  zbAnalogLights.addAnalogInput();
+  zbAnalogLights.setAnalogInputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER);
+  zbAnalogLights.setAnalogInputDescription("Light Brightness");
+  zbAnalogLights.setAnalogInputResolution(1);
+  zbAnalogLights.addAnalogOutput();
+  zbAnalogLights.setAnalogOutputApplication(ESP_ZB_ZCL_AI_PERCENTAGE_OTHER);
+  zbAnalogLights.setAnalogOutputDescription("Light Control");
+  zbAnalogLights.setAnalogOutputResolution(1);
+  zbAnalogLights.onAnalogOutputChange(setLightsBrightness);
+
+  // AHT10: air temperature (analog input)
+  zbAnalogTempAHT10.addAnalogInput();
+  zbAnalogTempAHT10.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
+  zbAnalogTempAHT10.setAnalogInputDescription("Air Temperature");
+  zbAnalogTempAHT10.setAnalogInputResolution(0.01);
+
+  // AHT10: air humidity (analog input)
+  zbAnalogHumAHT10.addAnalogInput();
+  zbAnalogHumAHT10.setAnalogInputApplication(ESP_ZB_ZCL_AI_HUMIDITY_OTHER);
+  zbAnalogHumAHT10.setAnalogInputDescription("Air Humidity");
+  zbAnalogHumAHT10.setAnalogInputResolution(0.01);
+
+  // DS18B20: water temperature (analog input)
+  zbAnalogTempDS18.addAnalogInput();
+  zbAnalogTempDS18.setAnalogInputApplication(ESP_ZB_ZCL_AI_TEMPERATURE_OTHER);
+  zbAnalogTempDS18.setAnalogInputDescription("Water Temperature");
+  zbAnalogTempDS18.setAnalogInputResolution(0.01);
+
+  // pH sensor (analog input)
+  zbAnalogPh.addAnalogInput();
+  zbAnalogPh.setAnalogInputApplication(ESP_ZB_ZCL_AI_COUNT_UNITLESS_OTHER);
+  zbAnalogPh.setAnalogInputDescription("Water pH");
+  zbAnalogPh.setAnalogInputResolution(0.01);
+
+  // TDS sensor (analog input)
+  zbAnalogTds.addAnalogInput();
+  zbAnalogTds.setAnalogInputApplication(ESP_ZB_ZCL_AI_COUNT_UNITLESS_OTHER);
+  zbAnalogTds.setAnalogInputDescription("Water TDS");
+  zbAnalogTds.setAnalogInputResolution(0.01);
+
+  // Air Pump (binary input + output)
+  zbBinaryAirPump.addBinaryInput();
+  zbBinaryAirPump.setBinaryInputApplication(0x0078); // Generic status
+  zbBinaryAirPump.setBinaryInputDescription("Air Pump Status");
+  zbBinaryAirPump.addBinaryOutput();
+  zbBinaryAirPump.setBinaryOutputApplication(0xFFFF);
+  zbBinaryAirPump.setBinaryOutputDescription("Air Pump On/Off");
+  zbBinaryAirPump.onBinaryOutputChange(airPumpSwitch);
+
+  // Water Pump (binary input + output)
+  zbBinaryWaterPump.addBinaryInput();
+  zbBinaryWaterPump.setBinaryInputApplication(0x0078);
+  zbBinaryWaterPump.setBinaryInputDescription("Water Pump Status");
+  zbBinaryWaterPump.addBinaryOutput();
+  zbBinaryWaterPump.setBinaryOutputApplication(0xFFFF);
+  zbBinaryWaterPump.setBinaryOutputDescription("Water Pump On/Off");
+  zbBinaryWaterPump.onBinaryOutputChange(waterPumpSwitch);
+
+  // Water Heater (binary input + output)
+  zbBinaryWaterHeater.addBinaryInput();
+  zbBinaryWaterHeater.setBinaryInputApplication(0x0078);
+  zbBinaryWaterHeater.setBinaryInputDescription("Water Heater Status");
+  zbBinaryWaterHeater.addBinaryOutput();
+  zbBinaryWaterHeater.setBinaryOutputApplication(0xFFFF);
+  zbBinaryWaterHeater.setBinaryOutputDescription("Water Heater On/Off");
+  zbBinaryWaterHeater.onBinaryOutputChange(waterHeaterSwitch);
+
+  // Dose Pump A (binary input + output)
+  zbBinaryDosePumpA.addBinaryInput();
+  zbBinaryDosePumpA.setBinaryInputApplication(0x0078);
+  zbBinaryDosePumpA.setBinaryInputDescription("Dose Pump A Status");
+  zbBinaryDosePumpA.addBinaryOutput();
+  zbBinaryDosePumpA.setBinaryOutputApplication(0xFFFF);
+  zbBinaryDosePumpA.setBinaryOutputDescription("Dose Pump A On/Off");
+  zbBinaryDosePumpA.onBinaryOutputChange(dosePumpASwitch);
+
+  // Dose Pump B (binary input + output)
+  zbBinaryDosePumpB.addBinaryInput();
+  zbBinaryDosePumpB.setBinaryInputApplication(0x0078);
+  zbBinaryDosePumpB.setBinaryInputDescription("Dose Pump B Status");
+  zbBinaryDosePumpB.addBinaryOutput();
+  zbBinaryDosePumpB.setBinaryOutputApplication(0xFFFF);
+  zbBinaryDosePumpB.setBinaryOutputDescription("Dose Pump B On/Off");
+  zbBinaryDosePumpB.onBinaryOutputChange(dosePumpBSwitch);
+
+  // Dose Pump C (binary input + output)
+  zbBinaryDosePumpC.addBinaryInput();
+  zbBinaryDosePumpC.setBinaryInputApplication(0x0078);
+  zbBinaryDosePumpC.setBinaryInputDescription("Dose Pump C Status");
+  zbBinaryDosePumpC.addBinaryOutput();
+  zbBinaryDosePumpC.setBinaryOutputApplication(0xFFFF);
+  zbBinaryDosePumpC.setBinaryOutputDescription("Dose Pump C On/Off");
+  zbBinaryDosePumpC.onBinaryOutputChange(dosePumpCSwitch);
+
+  // Add all endpoints to Zigbee core
+  Zigbee.addEndpoint(&zbAnalogFanA);
+  Zigbee.addEndpoint(&zbAnalogFanB);
+  Zigbee.addEndpoint(&zbAnalogLights);
+  Zigbee.addEndpoint(&zbAnalogTempAHT10);
+  Zigbee.addEndpoint(&zbAnalogHumAHT10);
+  Zigbee.addEndpoint(&zbAnalogTempDS18);
+  Zigbee.addEndpoint(&zbAnalogPh);
+  Zigbee.addEndpoint(&zbAnalogTds);
+  Zigbee.addEndpoint(&zbBinaryAirPump);
+  Zigbee.addEndpoint(&zbBinaryWaterPump);
+  Zigbee.addEndpoint(&zbBinaryWaterHeater);
+  Zigbee.addEndpoint(&zbBinaryDosePumpA);
+  Zigbee.addEndpoint(&zbBinaryDosePumpB);
+  Zigbee.addEndpoint(&zbBinaryDosePumpC);
 
   Serial.println("Zigbee initializing...");
   // When all EPs are registered, start Zigbee in End Device mode
@@ -192,7 +429,6 @@ void setup() {
     Serial.print(".");
     delay(100);
   }
-  _ep.setReporting(0, 300, 1.0);
   Serial.println();
 }
 
@@ -200,21 +436,35 @@ void setup() {
 void loop() {
   static uint32_t timeCounter = 0;
 
-  // Report periodically
-  // Read ADC value and update the analog value every 2s
-  if (!(timeCounter++ % 20)) {  // delaying for 100ms x 20 = 2s
-    float analog = (float)analogRead(analogPin);
-    Serial.printf("Updating analog input to %.1f\r\n", analog);
-    zbAnalogDevice.setAnalogInput(analog);
-    zbAnalogTemp.setAnalogInput(analog / 100);
-    zbAnalogFan.setAnalogInput(analog);
-    zbAnalogPercent.setAnalogInput(analog / 10);
+  // Every 5 seconds, read sensors and report
+  if (!(timeCounter++ % 50)) {  // 100ms * 50 = 5000ms
+    // Read DS18B20 (water temp)
+    sensors.requestTemperatures();
+    float waterTemp = sensors.getTempCByIndex(0);
 
-    // Analog input supports reporting
-    zbAnalogDevice.reportAnalogInput();
-    zbAnalogTemp.reportAnalogInput();
-    zbAnalogFan.reportAnalogInput();
-    zbAnalogPercent.reportAnalogInput();
+    // Read AHT10 (air temp and humidity)
+    sensors_event_t humidity, temp;
+    aht.getEvent(&humidity, &temp);
+    float airTemp = temp.temperature;
+    float airHum = humidity.relative_humidity;
+
+    // Read pH and TDS via ADC
+    int rawPh = analogRead(pH_GPIO);
+    float pHVal = (rawPh * 14.0) / 4095.0;  // Convert ADC to pH (0–14)
+    int rawTds = analogRead(TDS_GPIO);
+    float tdsVal = (rawTds * 1000.0) / 4095.0; // Convert ADC to ppm
+
+    // Update Zigbee analog inputs and report
+    zbAnalogTempDS18.setAnalogInput(waterTemp);
+    zbAnalogTempDS18.reportAnalogInput();
+    zbAnalogTempAHT10.setAnalogInput(airTemp);
+    zbAnalogTempAHT10.reportAnalogInput();
+    zbAnalogHumAHT10.setAnalogInput(airHum);
+    zbAnalogHumAHT10.reportAnalogInput();
+    zbAnalogPh.setAnalogInput(pHVal);
+    zbAnalogPh.reportAnalogInput();
+    zbAnalogTds.setAnalogInput(tdsVal);
+    zbAnalogTds.reportAnalogInput();
   }
 
 
@@ -232,5 +482,5 @@ void loop() {
     }
   }
 
-  delay(1000);
+  delay(100);
 }
