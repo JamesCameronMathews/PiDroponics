@@ -1,2 +1,2 @@
-# PiDroponics
-Integrated MQTT hydroponics based on ESP32-C6 Firebeetle 2
+# FiDroponics
+Integrated Zigbee hydroponics based on ESP32-C5 Firebeetle 2
